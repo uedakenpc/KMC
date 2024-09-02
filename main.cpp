@@ -6,27 +6,30 @@
 #include "KMCLogger.h"
 #include <fstream>
 #include <iostream>
+#include <chrono>
 
-inline static const double kbT = 0.1;
-
-inline static const double material_density = 0.2;
+inline static const double kbT = 0.5;  //0.034ã‹ã‚‰0.394?//
+inline static const double D = 0.347;
+inline static const double C = (8.9 - 8 * D) / sqrt(8);
+inline static const double material_density = 1.0;
+inline static const double material_density_2 = 1.0;
 
 struct MoveTarget {
-	int size_id_org;      //ˆÚ“®‘O‚ÌƒTƒCƒg‚ğ¦‚·ID//
-	int size_id_dest;     //ˆÚ“®Œã‚ÌƒTƒCƒg‚ğ¦‚·ID//
-	double ratio;         //ˆÚ“®•p“x(’PˆÊŠÔ“–‚½‚è‚Ì”­¶Šm—¦)//
+	int size_id_org;      //ç§»å‹•å‰ã®ã‚µã‚¤ãƒˆã‚’ç¤ºã™ID//
+	int size_id_dest;     //ç§»å‹•å¾Œã®ã‚µã‚¤ãƒˆã‚’ç¤ºã™ID//
+	double ratio;         //ç§»å‹•é »åº¦(å˜ä½æ™‚é–“å½“ãŸã‚Šã®ç™ºç”Ÿç¢ºç‡)//
 };
 
-//‚ ‚éƒTƒCƒg‚©‚çŒ©‚Ä—×(ˆÚ“®æ)‚Æ‚È‚éƒTƒCƒg(ƒpƒX)‚Ì”‚ÌãŒÀ//
-//ƒ†[ƒU[‚Ìİ’è‚·‚éŠiq‚ÉˆË‘¶‚µ‚Ä“KØ‚È’l‚ğİ’è‚¹‚æ//
+//ã‚ã‚‹ã‚µã‚¤ãƒˆã‹ã‚‰è¦‹ã¦éš£(ç§»å‹•å…ˆ)ã¨ãªã‚‹ã‚µã‚¤ãƒˆ(ãƒ‘ã‚¹)ã®æ•°ã®ä¸Šé™//
+//ãƒ¦ãƒ¼ã‚¶ãƒ¼ã®è¨­å®šã™ã‚‹æ ¼å­ã«ä¾å­˜ã—ã¦é©åˆ‡ãªå€¤ã‚’è¨­å®šã›ã‚ˆ//
 
 //constexpr size_t NUM_NEIGHBOR_SITES = 4; 
-struct EventAtom {//“¯ˆê‚Ì—±q‚Å‚à•¡”‚ÌˆÚ“®æ‚ğ‚Â‚Ì‚ÅA‚»‚ê‚ç‚ğˆê‚Â‚Ìî•ñ‚É“Z‚ß‚éˆ×‚ÌƒNƒ‰ƒX//
-	int atom_id;            //—±qŒÅ—L‚ÌID
-	int currest_site_id;    //—±q‚ªŒ»İˆÊ’u‚µ‚Ä‚¢‚éƒTƒCƒg//
+struct EventAtom {//åŒä¸€ã®ç²’å­ã§ã‚‚è¤‡æ•°ã®ç§»å‹•å…ˆã‚’æŒã¤ã®ã§ã€ãã‚Œã‚‰ã‚’ä¸€ã¤ã®æƒ…å ±ã«çºã‚ã‚‹ç‚ºã®ã‚¯ãƒ©ã‚¹//
+	int atom_id;            //ç²’å­å›ºæœ‰ã®ID
+	int currest_site_id;    //ç²’å­ãŒç¾åœ¨ä½ç½®ã—ã¦ã„ã‚‹ã‚µã‚¤ãƒˆ//
 	std::vector<MoveTarget> paths;
 	//std::array<MoveTarget, NUM_NEIGHBOR_SITES> paths;
-	//int num_effectivepaths = 0;    //—LŒø‚ÈˆÚ“®æ‚Ì”//
+	//int num_effectivepaths = 0;    //æœ‰åŠ¹ãªç§»å‹•å…ˆã®æ•°//
 
 	double Ratio() {
 		double ratio = 0.0;
@@ -40,82 +43,279 @@ struct EventAtom {//“¯ˆê‚Ì—±q‚Å‚à•¡”‚ÌˆÚ“®æ‚ğ‚Â‚Ì‚ÅA‚»‚ê‚ç‚ğˆê‚Â‚Ìî•ñ‚É“Z
 using KMCEventList = AVLTreeSum3<int, double, EventAtom*>;
 
 /*********************************************
-* Šî–{ƒ‹[ƒ‹
-* - —±q‚ÍŒˆ‚ß‚ç‚ê‚½ƒTƒCƒg(Šiq“_)‚Ìã‚ğˆÚ“®‚·‚é‚à‚Ì‚Æ‚·‚é
-* - ƒTƒCƒg‚ÍêŠ‚²‚Æ‚ÉˆêˆÓ‚ÉŒˆ‚ß‚ç‚ê‚½ŒÅ—L‚ÌID‚ğ‚Â
-*   - ‹t‚ÉID‚ª•ª‚©‚ê‚ÎƒTƒCƒg‚ÌÀ•W‚È‚Ç‚ª•ª‚©‚é‚à‚Ì‚Æ‚·‚é
+* åŸºæœ¬ãƒ«ãƒ¼ãƒ«
+* - ç²’å­ã¯æ±ºã‚ã‚‰ã‚ŒãŸã‚µã‚¤ãƒˆ(æ ¼å­ç‚¹)ã®ä¸Šã‚’ç§»å‹•ã™ã‚‹ã‚‚ã®ã¨ã™ã‚‹
+* - ã‚µã‚¤ãƒˆã¯å ´æ‰€ã”ã¨ã«ä¸€æ„ã«æ±ºã‚ã‚‰ã‚ŒãŸå›ºæœ‰ã®IDã‚’æŒã¤
+*   - é€†ã«IDãŒåˆ†ã‹ã‚Œã°ã‚µã‚¤ãƒˆã®åº§æ¨™ãªã©ãŒåˆ†ã‹ã‚‹ã‚‚ã®ã¨ã™ã‚‹
 * 
 ***********************************************/
 
 
 struct SiteInfo {
-	int exist_atom_id;  //ƒTƒCƒg‚É‘¶İ‚·‚é—±q‚ÌID//‘¶İ‚µ‚È‚¢‚Æ‚«‚ÍATOM_NONE‚Æ‚È‚é
+	int exist_atom_id;  //ã‚µã‚¤ãƒˆã«å­˜åœ¨ã™ã‚‹ç²’å­ã®ID//å­˜åœ¨ã—ãªã„ã¨ãã¯ATOM_NONEã¨ãªã‚‹
 	static const int ATOM_NONE = -1;
 };
 
 /**
-* ‰Šú‚Ì—±q”z’u‚ğŒˆ‚ß‚é
-* ŒvZ‚µ‚½‚¢Ş—¿‚Ì\‘¢‚É‡‚í‚¹‚Ä“K‹X‘‚«Š·‚¦‚é
-* ‚±‚Ì—á‚Å‚Ísites‚Å—^‚¦‚ç‚ê‚Ä‚¢‚éƒTƒCƒg‚ÉA‚ ‚éŠm—¦‚É]‚Á‚Ä—±q‚ğ”z’u‚·‚é
+* åˆæœŸã®ç²’å­é…ç½®ã‚’æ±ºã‚ã‚‹
+* è¨ˆç®—ã—ãŸã„ææ–™ã®æ§‹é€ ã«åˆã‚ã›ã¦é©å®œæ›¸ãæ›ãˆã‚‹
+* ã“ã®ä¾‹ã§ã¯sitesã§ä¸ãˆã‚‰ã‚Œã¦ã„ã‚‹ã‚µã‚¤ãƒˆã«ã€ã‚ã‚‹ç¢ºç‡ã«å¾“ã£ã¦ç²’å­ã‚’é…ç½®ã™ã‚‹
 **/
-void InitializeSite(std::vector<SiteInfo>& sites, std::vector<EventAtom>& atoms) {
+void InitializeSite(std::vector<SiteInfo>& sites, std::vector<EventAtom>& atoms, int lattice_x, int lattice_y, int lattice_z) {
 	unsigned int seed = 123456789;
 	std::mt19937 mt(seed);
-	std::uniform_real_distribution<double> dist(0.0, 1.0);
+	std::uniform_real_distribution<> dist(0.0, 1.0);
 
 	int num_atoms = 0;
 	int site_id = 0;
-	for (auto&& a : sites) {
-		if (dist(mt) < material_density) {//—±q‚ª‘¶İ//
-			a.exist_atom_id = num_atoms;
-			atoms.push_back(EventAtom{ num_atoms, site_id });
-			++num_atoms;
-		} else {
-			a.exist_atom_id = SiteInfo::ATOM_NONE;
+	int N = sites.size();
+	int M = lattice_x * lattice_y * 20  ; // ä¸‹ã‹ã‚‰1000å€‹åˆ†ã®ç²’å­
+
+	// xæ–¹å‘ã‚’5ç­‰åˆ†
+	int region_width_x = lattice_x / 10;
+	// zæ–¹å‘ã‚’5ç­‰åˆ† (z > 10ã®é ˜åŸŸã®ã¿)
+	int region_height_z = (lattice_z - 10) / 10;
+
+	// å„é ˜åŸŸã®ç²’å­é…ç½®ãƒ•ãƒ©ã‚° (5x5ã®2æ¬¡å…ƒé…åˆ—)
+	std::vector<std::vector<bool>> region_flags(10, std::vector<bool>(10, true));
+
+	// ã“ã“ã§å„é ˜åŸŸã®ãƒ•ãƒ©ã‚°ã‚’è¨­å®šã—ã¾ã™
+	//1æ®µç›®
+	//region_flags[0][0] = false;
+	//region_flags[1][0] = false;
+	//region_flags[2][0] = false;
+	//region_flags[3][0] = false;
+	//region_flags[4][0] = false;
+	//region_flags[5][0] = false;
+
+	//2æ®µç›®
+	//region_flags[0][1] = false;
+	//region_flags[1][1] = false;
+	//region_flags[2][1] = false;
+	//region_flags[3][1] = false;
+	//region_flags[4][1] = false;
+
+	//3æ®µç›®
+	//region_flags[0][2] = false;
+	//region_flags[1][2] = false;
+    //region_flags[2][2] = false;
+	//region_flags[3][2] = false;
+	//region_flags[4][2] = false;
+	//region_flags[5][2] = false;
+	//region_flags[6][2] = false;
+	//region_flags[7][2] = false;
+	//region_flags[8][2] = false;
+	//region_flags[9][2] = false;
+	//4æ®µç›®
+	//region_flags[0][3] = false;
+	//region_flags[1][3] = false;
+	//region_flags[2][3] = false;
+	//region_flags[3][3] = false;
+	//region_flags[4][3] = false;
+	//region_flags[5][3] = false;
+	//region_flags[6][3] = false;
+	//region_flags[7][3] = false;
+	//region_flags[8][3] = false;
+	//region_flags[9][3] = false;
+
+	//5æ®µç›®
+	//region_flags[0][4] = false;
+	//region_flags[1][4] = false;
+	region_flags[2][4] = false;
+	region_flags[3][4] = false;
+	//region_flags[4][4] = false;
+	region_flags[5][4] = false;
+	region_flags[6][4] = false;
+	//region_flags[7][4] = false;
+	//region_flags[9][4] = false;
+
+	//6æ®µç›®
+	//region_flags[0][5] = false;
+	//region_flags[1][5] = false;
+	region_flags[2][5] = false;
+	region_flags[3][5] = false;
+	//region_flags[4][5] = false;
+	region_flags[5][5] = false;
+	region_flags[6][5] = false;
+	//region_flags[7][5] = false;
+	//region_flags[9][5] = false;
+	
+	//7æ®µç›®
+	//region_flags[0][6] = false;
+	//region_flags[1][6] = false;
+	//region_flags[2][6] = false;
+	//region_flags[3][6] = false;
+	//region_flags[4][6] = false;
+	//region_flags[5][6] = false;
+
+	//region_flags[9][6] = false;
+
+	//8æ®µç›®
+	/*
+	region_flags[0][7] = false;
+	region_flags[1][7] = false;
+	region_flags[2][7] = false;
+	region_flags[3][7] = false;
+	region_flags[4][7] = false;
+	region_flags[5][7] = false;
+	region_flags[6][7] = false;
+	region_flags[7][7] = false;
+	region_flags[8][7] = false;
+	region_flags[9][7] = false;
+	
+
+	//9æ®µç›®
+	region_flags[0][8] = false;
+	region_flags[1][8] = false;
+	region_flags[2][8] = false;
+	region_flags[3][8] = false;
+	region_flags[4][8] = false;
+	region_flags[5][8] = false;
+	region_flags[6][8] = false;
+	region_flags[7][8] = false;
+	region_flags[8][8] = false;
+	region_flags[9][8] = false;
+	//10æ®µç›®
+	region_flags[0][9] = false;
+	region_flags[1][9] = false;
+	region_flags[2][9] = false;
+	region_flags[3][9] = false;
+	region_flags[4][9] = false;
+	region_flags[5][9] = false;
+	region_flags[6][9] = false;
+	region_flags[7][9] = false;
+	region_flags[8][9] = false;
+	region_flags[9][9] = false;
+	//*/
+	
+	int sheet_thickness = 3; // ã‚·ãƒ¼ãƒˆã®åšã•ï¼ˆyè»¸æ–¹å‘ã®ç²’å­ã‚’é…ç½®ã™ã‚‹ç¯„å›²ï¼‰
+
+	for (int i = 0; i < N; ++i) {
+		auto& a = sites[i];
+		int unit_cell_id = site_id / 2;
+		int ix = unit_cell_id % lattice_x;
+		int iy = (unit_cell_id / lattice_x) % lattice_y;
+		int iz = unit_cell_id / (lattice_x * lattice_y);
+
+		if (iy < sheet_thickness) {
+			// æ—¢å­˜ã®é…ç½®ãƒ­ã‚¸ãƒƒã‚¯
+			if (iz < 10) {
+				// ä¸‹ã‹ã‚‰1000å€‹åˆ†ã®ç²’å­ã¯ãã®ã¾ã¾æ•·ãè©°ã‚ã‚‹
+				a.exist_atom_id = num_atoms;
+				atoms.push_back(EventAtom{ num_atoms, site_id });
+				++num_atoms;
+				//æ•·ãè©°ã‚ãªã„
+				//a.exist_atom_id = SiteInfo::ATOM_NONE;
+			}
+			else {
+				// z > 10ã®é ˜åŸŸã‚’25å€‹ã®ã‚¨ãƒªã‚¢ã«åˆ†å‰²
+				int region_x = ix / region_width_x;
+				int region_z = (iz - 10) / region_height_z;
+
+				if (region_flags[region_x][region_z] && dist(mt) < material_density) {
+					a.exist_atom_id = num_atoms;
+					atoms.push_back(EventAtom{ num_atoms, site_id });
+					++num_atoms;
+				}
+				else {
+					a.exist_atom_id = SiteInfo::ATOM_NONE;
+				}
+			}
 		}
 		++site_id;
 	}
 }
 
 vec3d GetCoordinate(int site_id, int lattice_x, int lattice_y, int lattice_z, double lattice_constant) {
-	int odd = site_id % 2;  //‹ô”‚È‚ç0Šï”‚È‚ç1
+	int odd = site_id % 2;  //å¶æ•°ãªã‚‰0å¥‡æ•°ãªã‚‰1
 	int unit_cell_id = site_id / 2;
 	int ix = unit_cell_id % lattice_x;
 	int iy = (unit_cell_id / lattice_x) % lattice_y;
 	int iz = unit_cell_id / (lattice_x * lattice_y);
-	return vec3d{ lattice_constant * (double)ix * 2 + lattice_constant * odd, lattice_constant * (double)iy * 2 + lattice_constant * odd,lattice_constant * (double)iz * 2 + lattice_constant * odd };
+	return vec3d{ lattice_constant * ((double)ix * 2 + odd), lattice_constant * ((double)iy * 2 + odd),lattice_constant * ((double)iz * 2 + odd) };
 }
 
+
+//éš£ã®ã‚µã‚¤ãƒˆã‚’æ´—ã„å‡ºã™é–¢æ•°//
+//
 void GetMoveTargetList(std::vector<int>& neighbor_ids, int site_id, int lattice_x, int lattice_y, int lattice_z) {
-	int odd = site_id % 2;  //‹ô”‚È‚ç0Šï”‚È‚ç1
-	int unit_cell_id = site_id / 2;
+	const int num_in_cell = 2;
+	int odd = site_id % num_in_cell;  //å¶æ•°ãªã‚‰0å¥‡æ•°ãªã‚‰1
+	int unit_cell_id = site_id / num_in_cell;
 	int ix = unit_cell_id % lattice_x;
 	int iy = (unit_cell_id / lattice_x) % lattice_y;
 	int iz = unit_cell_id / (lattice_x * lattice_y);
 
+	auto GetSiteID = [&](int id_in_cell, int ix, int iy, int iz) {
+		ix = (ix + lattice_x) % lattice_x; //periodic//
+		iy = (iy + lattice_y) % lattice_y; //periodic//
+		iz = (iz + lattice_z) % lattice_z; //periodic//
+		return id_in_cell + num_in_cell * (ix + lattice_x * (iy + lattice_y * iz));
+		};
+
 	if (odd == 0) {
+		neighbor_ids.push_back(GetSiteID(1, ix-1, iy-1, iz));
+		neighbor_ids.push_back(GetSiteID(1, ix, iy-1, iz));
+		neighbor_ids.push_back(GetSiteID(1, ix-1, iy, iz));
+		neighbor_ids.push_back(GetSiteID(1, ix, iy, iz));
+		/*
 		neighbor_ids.push_back((((ix - 1 + lattice_x) % lattice_x) + lattice_x * ((iy - 1 + lattice_y) % lattice_y)) * 2 + 1 + lattice_x * lattice_y * iz * 2);
 		neighbor_ids.push_back((ix + lattice_x * ((iy - 1 + lattice_y) % lattice_y)) * 2 + 1 + lattice_x * lattice_y * iz * 2);
 		neighbor_ids.push_back((((ix - 1 + lattice_x) % lattice_x) + lattice_x * iy) * 2 + 1 + lattice_x * lattice_y * iz * 2);
 		neighbor_ids.push_back((ix + lattice_x * iy) * 2 + 1 + lattice_x * lattice_y * iz * 2);
-		if (iz > 0) {
+		*/
+		
+		//neighbor_ids.push_back(GetSiteID(1, ix - 1, iy - 1, iz-1));
+		//neighbor_ids.push_back(GetSiteID(1, ix, iy - 1, iz - 1));
+		//neighbor_ids.push_back(GetSiteID(1, ix - 1, iy, iz - 1));
+		//neighbor_ids.push_back(GetSiteID(1, ix, iy, iz - 1));
+		//if (iz > 0) {
+		neighbor_ids.push_back(GetSiteID(1, ix - 1, iy - 1, iz - 1));
+		neighbor_ids.push_back(GetSiteID(1, ix, iy - 1, iz - 1));
+		neighbor_ids.push_back(GetSiteID(1, ix - 1, iy, iz - 1));
+		neighbor_ids.push_back(GetSiteID(1, ix, iy, iz - 1));
+
+			/*
 			neighbor_ids.push_back((((ix - 1 + lattice_x) % lattice_x) + lattice_x * ((iy - 1 + lattice_y) % lattice_y)) * 2 + 1 + lattice_x * lattice_y * (iz - 1) * 2);
 			neighbor_ids.push_back((ix + lattice_x * ((iy - 1 + lattice_y) % lattice_y)) * 2 + 1 + lattice_x * lattice_y * (iz - 1) * 2);
 			neighbor_ids.push_back((((ix - 1 + lattice_x) % lattice_x) + lattice_x * iy) * 2 + 1 + lattice_x * lattice_y * (iz - 1) * 2);
 			neighbor_ids.push_back((ix + lattice_x * iy) * 2 + 1 + lattice_x * lattice_y * (iz - 1) * 2);
-		}
+			*/
+		//}
+			
 	}
 	else {
-		neighbor_ids.push_back((((ix - 1 + lattice_x) % lattice_x) + lattice_x * ((iy - 1 + lattice_y) % lattice_y)) * 2 + lattice_x * lattice_y * iz * 2);
-		neighbor_ids.push_back((ix + lattice_x * ((iy - 1 + lattice_y) % lattice_y)) * 2 + lattice_x * lattice_y * iz * 2);
-		neighbor_ids.push_back((((ix - 1 + lattice_x) % lattice_x) + lattice_x * iy) * 2 + lattice_x * lattice_y * iz * 2);
+
+		neighbor_ids.push_back(GetSiteID(0, ix + 1, iy + 1, iz));
+		neighbor_ids.push_back(GetSiteID(0, ix, iy + 1, iz));
+		neighbor_ids.push_back(GetSiteID(0, ix + 1, iy, iz));
+		neighbor_ids.push_back(GetSiteID(0, ix, iy, iz));
+		/*
+		neighbor_ids.push_back((((ix + 1 ) % lattice_x) + lattice_x * ((iy + 1 ) % lattice_y)) * 2 + lattice_x * lattice_y * iz * 2);
+		neighbor_ids.push_back((ix + lattice_x * ((iy + 1 ) % lattice_y)) * 2 + lattice_x * lattice_y * iz * 2);
+		neighbor_ids.push_back((((ix + 1 ) % lattice_x) + lattice_x * iy) * 2 + lattice_x * lattice_y * iz * 2);
 		neighbor_ids.push_back((ix + lattice_x * iy) * 2 + lattice_x * lattice_y * iz * 2);
-		if (iz < lattice_z - 1) {
-			neighbor_ids.push_back((((ix - 1 + lattice_x) % lattice_x) + lattice_x * ((iy - 1 + lattice_y) % lattice_y)) * 2 + lattice_x * lattice_y * (iz + 1) * 2);
-			neighbor_ids.push_back((ix + lattice_x * ((iy - 1 + lattice_y) % lattice_y)) * 2 + lattice_x * lattice_y * (iz + 1) * 2);
-			neighbor_ids.push_back((((ix - 1 + lattice_x) % lattice_x) + lattice_x * iy) * 2 + lattice_x * lattice_y * (iz + 1) * 2);
+		*/
+		
+		//neighbor_ids.push_back(GetSiteID(0, ix + 1, iy + 1, iz + 1));
+		//neighbor_ids.push_back(GetSiteID(0, ix, iy + 1, iz + 1));
+		//neighbor_ids.push_back(GetSiteID(0, ix + 1, iy, iz + 1));
+		//neighbor_ids.push_back(GetSiteID(0, ix, iy, iz + 1));
+
+		//if (iz < lattice_z - 1) {
+		neighbor_ids.push_back(GetSiteID(0, ix + 1, iy + 1, iz + 1));
+		neighbor_ids.push_back(GetSiteID(0, ix, iy + 1, iz + 1));
+		neighbor_ids.push_back(GetSiteID(0, ix + 1, iy, iz + 1));
+		neighbor_ids.push_back(GetSiteID(0, ix, iy, iz + 1));
+
+			/*
+			neighbor_ids.push_back((((ix + 1 ) % lattice_x) + lattice_x * ((iy + 1 ) % lattice_y)) * 2 + lattice_x * lattice_y * (iz + 1) * 2);
+			neighbor_ids.push_back((ix + lattice_x * ((iy + 1 ) % lattice_y)) * 2 + lattice_x * lattice_y * (iz + 1) * 2);
+			neighbor_ids.push_back((((ix + 1 ) % lattice_x) + lattice_x * iy) * 2 + lattice_x * lattice_y * (iz + 1) * 2);
 			neighbor_ids.push_back((ix + lattice_x * iy) * 2 + lattice_x * lattice_y * (iz + 1) * 2);
-		}
+			*/
+		//}
+		
 	}
 
 }
@@ -126,10 +326,10 @@ std::vector<int> GetNeighborAtomPresence(const std::vector<SiteInfo>& sites, int
 	std::vector<int> neighbor_presence;
 	for (const auto& id : neighbor_ids) {
 		if (sites[id].exist_atom_id != SiteInfo::ATOM_NONE) {
-			neighbor_presence.push_back(1); // Œ´q‚ª‘¶İ‚·‚éê‡
+			neighbor_presence.push_back(1); // åŸå­ãŒå­˜åœ¨ã™ã‚‹å ´åˆ
 		}
 		else {
-			neighbor_presence.push_back(0); // Œ´q‚ª‘¶İ‚µ‚È‚¢ê‡
+			neighbor_presence.push_back(0); // åŸå­ãŒå­˜åœ¨ã—ãªã„å ´åˆ
 		}
 	}
 	return neighbor_presence;
@@ -138,78 +338,129 @@ std::vector<int> GetNeighborAtomPresence(const std::vector<SiteInfo>& sites, int
 int FindoutMoveTarget(EventAtom& a, const std::vector<SiteInfo>& sites, int lattice_x, int lattice_y, int lattice_z) {
 	const int current_id = a.currest_site_id;
 
-	//—±q‚Éİ’èÏ‚İ‚ÌˆÚ“®ƒŠƒXƒg‚ğƒNƒŠƒA//
+	if (sites[current_id].exist_atom_id == 2595) {
+		int abc = current_id;
+	}
+
+	//ç²’å­ã«è¨­å®šæ¸ˆã¿ã®ç§»å‹•ãƒªã‚¹ãƒˆã‚’ã‚¯ãƒªã‚¢//
 	a.paths.clear();
 
-	//(1)Œ»İˆÊ’u‚©‚ç‚ÌˆÚ“®æ‚Æ‚È‚éƒTƒCƒg‚ğƒŠƒXƒgƒAƒbƒv//
 	std::vector<int> target_ids;
 	GetMoveTargetList(target_ids, current_id, lattice_x, lattice_y, lattice_z);
-	//(2)Œ»İˆÊ’u‚ÌƒGƒlƒ‹ƒM[ŒvZE_A
-	//a‚Ìü•Ó—±q‚©‚çƒGƒlƒ‹ƒM[‚ğŒˆ‚ß‚é
-	//E_A=-sqrt(N_A)
-	//target_id ‚ÍƒŠƒXƒgƒAƒbƒvÏ‚İ
-	int N_a = 0;
+
+	// ç¾åœ¨ä½ç½®ã®å‘¨è¾º8ã‚µã‚¤ãƒˆã®IDã‚’å–å¾—
+	std::vector<int> current_neighbor_ids;
+	GetMoveTargetList(current_neighbor_ids, current_id, lattice_x, lattice_y, lattice_z);
+
+	//ã‚¨ãƒãƒ«ã‚®ãƒ¼å·® E_C - E_A ////////////////////////////////////////////
+	// æ³¨ç›®åŸå­ã®å‘¨è¾ºåŸå­æ•°ã‚’æ•°ãˆã¦ã€ãã®å¹³æ–¹æ ¹ã‚’E_aã«åŠ ç®—
+	int N_current = 0;
 	for (const auto& tid : target_ids) {
 		if (sites[tid].exist_atom_id != SiteInfo::ATOM_NONE) {
-			
-			N_a++;
-			
+			N_current++;
+		}
+	}
+	double dE_C_from_A = D * (double)N_current + C * sqrt((double)N_current);
+	//0-(-C*rootN)
+
+	// å‘¨è¾º8ã‚µã‚¤ãƒˆã«ã¤ã„ã¦ã€å„ã‚µã‚¤ãƒˆã®å‘¨è¾ºåŸå­æ•°ã‚’æ•°ãˆã¦ã€ãã®å¹³æ–¹æ ¹ã‚’E_aã«åŠ ç®—
+
+	//ç‚¹oã¾ã‚ã‚Šã®ãƒ«ãƒ¼ãƒ—
+	for (const auto& neighbor_id : current_neighbor_ids) {
+		if (sites[neighbor_id].exist_atom_id == SiteInfo::ATOM_NONE) continue;
+
+		int N_neighbor = 0;
+		std::vector<int> neighbor_target_ids;
+		GetMoveTargetList(neighbor_target_ids, neighbor_id, lattice_x, lattice_y, lattice_z);
+
+
+		for (const auto& tid : neighbor_target_ids) {
+			if (sites[tid].exist_atom_id != SiteInfo::ATOM_NONE) {
+				N_neighbor++;
+			}
+		}
+
+		if (N_neighbor > 0) {
+			dE_C_from_A +=  -D * ((double)(N_neighbor - 1) - (double)N_neighbor) - C * (sqrt((double)(N_neighbor - 1)) - sqrt((double)N_neighbor));
 		}
 	}
 
-	double E_a = 0.0;
-	if (N_a > 0) {
-		E_a = -sqrt((double)N_a);
-	}
+	////////////////////////////////////////////ã‚¨ãƒãƒ«ã‚®ãƒ¼å·® E_C - E_A //
 
 	
-	int num=0;
+
+	int num = 0;
 	for (const auto& tid : target_ids) {
 		if (sites[tid].exist_atom_id == SiteInfo::ATOM_NONE) {
-			//ˆÚ“®æƒTƒCƒg‚É‘¼‚Ì—±q‚ª‚¢‚È‚¢‚Æ‚«//
-			//ˆÚ“®Šm—¦‚ğŒˆ‚ß‚é//
-			//‚±‚±‚Å‚Íb’è“I‚É1.0//
-			//double ratio = 1.0;
-			//Œ´q‚ÌˆÚ“®æ‚ÆˆÚ“®Šm—¦‚ğ’Ç‰Á//
-			//ratio‚ÍƒGƒlƒ‹ƒM[·‚ÅŒˆ‚ß‚é
 
-			//sæ‚ÉŒ´qa‚ª‚¢‚é‚Æ‰¼’è‚µ‚½‚Æ‚«‚ÌE_b‚ğZo
-			//sæ‚ğb‚Æ‚µ‚Ä
-			//ƒTƒCƒgb‚Ìü‚è‚ÌŒ´q‚ğ”‚¦‚ÄN_b‚Æ‚·‚é
-			//E_b=-sqrt(N_b)
-			//E_a‚Æ“¯‚¶’è‹`
-			//s‚«æb‚Í@tid
-			//sæb‚©‚çŒ©‚½ü•ÓƒTƒCƒg‚ğƒŠƒXƒgƒAƒbƒv
+			//ã‚¨ãƒãƒ«ã‚®ãƒ¼å·® E_B - E_C ////////////////////////////////////////////
+
+
+			// ç§»å‹•å…ˆã‚µã‚¤ãƒˆã«ä»–ã®ç²’å­ãŒã„ãªã„ã¨ã
+			// è¡Œå…ˆã«åŸå­aãŒã„ã‚‹ã¨ä»®å®šã—ãŸã¨ãã®E_bã‚’ç®—å‡º
+			// è¡Œå…ˆã‚’bã¨ã—ã¦
+			// ã‚µã‚¤ãƒˆbã®å‘¨ã‚Šã®åŸå­ã‚’æ•°ãˆã¦N_bã¨ã™ã‚‹
+			// E_b = -sqrt(N_1) - sqrt(N_2) - sqrt(N_3) - sqrt(N_4) - ... - sqrt(N_8) - sqrt(N_b)
+			// è¡Œãå…ˆbã¯tid
+			// è¡Œå…ˆbã‹ã‚‰è¦‹ãŸå‘¨è¾ºã‚µã‚¤ãƒˆã‚’ãƒªã‚¹ãƒˆã‚¢ãƒƒãƒ—
 			std::vector<int> surround_b;
 			GetMoveTargetList(surround_b, tid, lattice_x, lattice_y, lattice_z);
-			//N_b‚ğ”‚¦‚é
-			int N_b = 0;
-			for (const auto& id2 : surround_b) {
-				if (sites[id2].exist_atom_id != SiteInfo::ATOM_NONE) {
-					if (id2 != current_id) {
-						N_b++;
-					}
-					
 
-			
 
+
+			// æ³¨ç›®åŸå­ã®å‘¨è¾ºåŸå­æ•°ã‚’æ•°ãˆã¦ã€ãã®å¹³æ–¹æ ¹ã‚’E_bã«åŠ ç®—
+			int N_target = 0;
+			for (const auto& id : surround_b) {
+				if (sites[id].exist_atom_id != SiteInfo::ATOM_NONE && id != current_id) {
+					N_target++;
 				}
 			}
-			//‚±‚Ì“_‚ÅN_b‚ª“¾‚ç‚ê‚½
-			double E_b = 0.0;
-			if (N_b > 0) {
-				E_b = -sqrt((double)N_b);
+
+			double dE_B_from_C= -D * (double)N_target - C * (sqrt((double)N_target));
+			
+
+			
+			
+			// å‘¨è¾º8ã‚µã‚¤ãƒˆã«ã¤ã„ã¦ã€å„ã‚µã‚¤ãƒˆã®å‘¨è¾ºåŸå­æ•°ã‚’æ•°ãˆã¦ã€ãã®å¹³æ–¹æ ¹ã‚’E_bã«åŠ ç®—
+			for (const auto& neighbor_id : surround_b) {
+				if (sites[neighbor_id].exist_atom_id == SiteInfo::ATOM_NONE ) continue;
+				if (neighbor_id == current_id) continue;
+
+				int N_neighbor = 0;
+				std::vector<int> neighbor_target_ids;
+				GetMoveTargetList(neighbor_target_ids, neighbor_id, lattice_x, lattice_y, lattice_z);
+
+				for (const auto& id : neighbor_target_ids) {
+					if (sites[id].exist_atom_id != SiteInfo::ATOM_NONE && id != current_id) {
+						N_neighbor++;
+					}
+				}
+
+				//dE_B_from_C +=  -D * ((double)N_neighbor + 1 - (double)N_neighbor) - C * (sqrt((double)N_neighbor + 1) - sqrt((double)N_neighbor));
+				if (N_neighbor == 0) {
+					dE_B_from_C = 0;
+				}
+				else {
+					dE_B_from_C += -D * ((double)N_neighbor + 1 - (double)N_neighbor) - C * (sqrt((double)N_neighbor + 1) - sqrt((double)N_neighbor));
+				}
 			}
 
-			//b’è“I‚ÉkbT=1.0
+			double dE_B_from_A = dE_B_from_C + dE_C_from_A;
+
+			////////////////////////////////////////////ã‚¨ãƒãƒ«ã‚®ãƒ¼å·® E_B - E_C //
+
+
+			// æš«å®šçš„ã«kbT=1.0
 			double ratio;
-			if ((E_b - E_a) > 0.0) {
-				ratio = exp(-(E_b - E_a) / kbT);
+
+
+			if ((dE_B_from_A) > 0.0) {
+				ratio = exp(-dE_B_from_A / kbT);
 			}
 			else {
 				ratio = 1.0;
 			}
-			
+
 			a.paths.emplace_back(MoveTarget{ current_id, tid, ratio });
 			++num;
 		}
@@ -219,12 +470,39 @@ int FindoutMoveTarget(EventAtom& a, const std::vector<SiteInfo>& sites, int latt
 }
 
 
+void GetSecondNeighborList(std::vector<int>& neighbor_ids, int site_id, int lattice_x, int lattice_y, int lattice_z) {
+	const int num_in_cell = 2;
+	int id_in_cell = site_id % num_in_cell;
+	int unit_cell_id = site_id / num_in_cell;
+	int ix = unit_cell_id % lattice_x;
+	int iy = (unit_cell_id / lattice_x) % lattice_y;
+	int iz = unit_cell_id / (lattice_x * lattice_y);
+
+	auto GetSiteID = [&](int id_in_cell, int ix, int iy, int iz) {
+		ix = (ix + lattice_x) % lattice_x; //periodic//
+		iy = (iy + lattice_y) % lattice_y; //periodic//
+		iz = (iz + lattice_z) % lattice_z; //periodic//
+		return id_in_cell + num_in_cell * (ix + lattice_x * (iy + lattice_y * iz));
+		};
+
+
+	neighbor_ids.push_back(GetSiteID(id_in_cell, ix + 1, iy, iz));
+	neighbor_ids.push_back(GetSiteID(id_in_cell, ix, iy + 1, iz));
+	neighbor_ids.push_back(GetSiteID(id_in_cell, ix, iy, iz + 1));
+	neighbor_ids.push_back(GetSiteID(id_in_cell, ix - 1, iy, iz));
+	neighbor_ids.push_back(GetSiteID(id_in_cell, ix, iy - 1, iz));
+	neighbor_ids.push_back(GetSiteID(id_in_cell, ix, iy, iz - 1));
+
+}
+
 
 void GetResearchSiteList(std::vector<int>& neighbor_ids, int site_id_before, int site_id_after, int lattice_x, int lattice_y, int lattice_z) {
 	
 
 	GetMoveTargetList(neighbor_ids, site_id_before, lattice_x, lattice_y, lattice_z);
 	GetMoveTargetList(neighbor_ids, site_id_after, lattice_x, lattice_y, lattice_z);
+	GetSecondNeighborList(neighbor_ids, site_id_before, lattice_x, lattice_y, lattice_z);
+	GetSecondNeighborList(neighbor_ids, site_id_after, lattice_x, lattice_y, lattice_z);
 
 	std::sort(neighbor_ids.begin(), neighbor_ids.end());
 	neighbor_ids.erase(std::unique(neighbor_ids.begin(), neighbor_ids.end()), neighbor_ids.end());
@@ -234,11 +512,13 @@ void GetResearchSiteList(std::vector<int>& neighbor_ids, int site_id_before, int
 
 int main(int argc, char* argv[]) {
 	printf("Simple KMC start--------------------\n");
-	const int64_t STEPS = 10000;
-	const int lattice_x = 10;
-	const int lattice_y = 1;
-	const int lattice_z = 10;
-	double lattice_constant = 1.0;
+	// é–‹å§‹æ™‚åˆ»ã‚’è¨˜éŒ²
+	auto start_time = std::chrono::high_resolution_clock::now();
+	const int64_t STEPS = 300000;
+	const int lattice_x = 50;
+	const int lattice_y = 2;
+	const int lattice_z = 60;
+	double lattice_constant = 3.0;
 	double box_axis_org[12]{ lattice_constant * (double)lattice_x * 2, 0.0, 0.0,
 					0.0, lattice_constant * (double)lattice_y * 2, 0.0,
 					0.0, 0.0, lattice_constant * (double)lattice_z * 2,
@@ -247,49 +527,60 @@ int main(int argc, char* argv[]) {
 	std::vector<SiteInfo> sites(lattice_x * lattice_y * lattice_z * 2);
 	std::vector<EventAtom> atoms;
 
-	//ƒf[ƒ^o—Í‹@”\‚ğ‚Á‚½ƒNƒ‰ƒX//
+	//ãƒ‡ãƒ¼ã‚¿å‡ºåŠ›æ©Ÿèƒ½ã‚’æŒã£ãŸã‚¯ãƒ©ã‚¹//
 	KMCLogger logger;
 	FILE* fp = fopen("kmc_log.krb", "w");
 	logger.Initialize(fp, box_axis_org);
 
-	//ƒTƒCƒg‚É‰Šú‚Ì—±q‚ğ”z’u//
-	InitializeSite(sites, atoms);
+	//ã‚µã‚¤ãƒˆã«åˆæœŸã®ç²’å­ã‚’é…ç½®//
+	InitializeSite(sites, atoms,lattice_x, lattice_y,  lattice_z);
 
-	//‰Šú—±q‚ÌˆÊ’u‚ğlogger‚É“o˜^//
+	//åˆæœŸç²’å­ã®ä½ç½®ã‚’loggerã«ç™»éŒ²//
 	for (const auto& a : atoms) {
 		const vec3d position = GetCoordinate(a.currest_site_id,lattice_x, lattice_y, lattice_z, lattice_constant);
 		logger.Add(0, a.currest_site_id, a.currest_site_id, position, a.atom_id);
 	}
 
 	KMCEventList kmc_event_list;
-	//‘S‚Ä‚Ì—±q‚ÌˆÚ“®Œó•â‚ğô‚¢o‚·//
+	//å…¨ã¦ã®ç²’å­ã®ç§»å‹•å€™è£œã‚’æ´—ã„å‡ºã™//
 	for (auto& a : atoms) {
 		const int num_found = FindoutMoveTarget(a, sites, lattice_x, lattice_y, lattice_z);
 		if (num_found > 0) {
 			double ratio = a.Ratio();
-			const int key = a.atom_id; //—±qID‚ğƒ†ƒj[ƒNkey‚Æ‚µ‚ÄƒCƒxƒ“ƒg“o˜^‚·‚é//
+			const int key = a.atom_id; //ç²’å­IDã‚’ãƒ¦ãƒ‹ãƒ¼ã‚¯keyã¨ã—ã¦ã‚¤ãƒ™ãƒ³ãƒˆç™»éŒ²ã™ã‚‹//
 			kmc_event_list.Insert(key, ratio, &a);
 		}
 	}
 	
 
-	//—”‚Ì€”õ//
+	//ä¹±æ•°ã®æº–å‚™//
 	const unsigned int seed = 82109832;
 	std::mt19937 mt(seed);
 	std::uniform_real_distribution<double> dist(0.0,1.0);
-
+	double elapse_time = 0.0;
+	std::vector<double> time_list;
 	for (int64_t istep = 1; istep <= STEPS; ++istep) {
-		//(1)ƒCƒxƒ“ƒg‚ğ‹N‚±‚·//
-		//(1.1)—”‚Ì¶¬
+		//(1)ã‚¤ãƒ™ãƒ³ãƒˆã‚’èµ·ã“ã™//
+		//(1.1)ä¹±æ•°ã®ç”Ÿæˆ
 		const double total_ratio = kmc_event_list.TotalRatio();
 		const double point = dist(mt) * total_ratio;
 
-		//(1.2)ˆÚ“®—±q‚ğ‘I‘ğ//
+		//(1.2)ç§»å‹•ç²’å­ã‚’é¸æŠ//
 		double residual;
 		auto hit = kmc_event_list.Bring(point, &residual);
 		auto& a = hit.value();
 		
-		//(1.3)‘I‘ğ‚³‚ê‚½—±q‚Í•¡”‚ÌˆÚ“®æ‚ğ‚Â‚Ì‚Å‚»‚Ì‚¤‚¿ˆê‚Â‚ğ‘I‘ğ
+		// é¸æŠã•ã‚ŒãŸç²’å­ã®å‘¨è¾ºç²’å­æ•°ã‚’ã‚«ã‚¦ãƒ³ãƒˆ
+		int neighbor_count = 0;
+		std::vector<int> neighbor_ids;
+		GetMoveTargetList(neighbor_ids, a->currest_site_id, lattice_x, lattice_y, lattice_z);
+		for (const auto& id : neighbor_ids) {
+			if (sites[id].exist_atom_id != SiteInfo::ATOM_NONE) {
+				neighbor_count++;
+			}
+		}
+
+		//(1.3)é¸æŠã•ã‚ŒãŸç²’å­ã¯è¤‡æ•°ã®ç§»å‹•å…ˆã‚’æŒã¤ã®ã§ãã®ã†ã¡ä¸€ã¤ã‚’é¸æŠ
 		double sum=0.0;
 		int path_index = 0;
 		for (const auto& p : a->paths) {
@@ -302,47 +593,67 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		//(2)‘I‘ğ‚³‚ê‚½—±q‚ğˆÚ“®‚³‚¹‚é//
+		//(2)é¸æŠã•ã‚ŒãŸç²’å­ã‚’ç§»å‹•ã•ã›ã‚‹//
 		int site_id_before = a->currest_site_id;
 		int site_id_after = a->paths[path_index].size_id_dest;
 		sites[site_id_before].exist_atom_id = SiteInfo::ATOM_NONE;
 		sites[site_id_after].exist_atom_id = a->atom_id;
 		a->currest_site_id = site_id_after;
 
-		//(2.2)ˆÚ“®‚ğƒƒO‚É“o˜^//
+		//(2.2)ç§»å‹•ã‚’ãƒ­ã‚°ã«ç™»éŒ²//
 		const vec3d position = GetCoordinate(site_id_after, lattice_x, lattice_y, lattice_z, lattice_constant);
 		logger.Add(istep, site_id_before, site_id_after, position, a->atom_id);
 
-		//(3)ˆÚ“®æ‚ÌÄ’Tõ//
-		//—±q‚ÌˆÚ“®‚É”º‚¢AˆÚ“®‚µ‚½—±q‚ÌV‚µ‚¢ˆÚ“®æ‚ğŒ©‚Â‚¯‚é//
-		//‰Á‚¦‚Ä‚»‚Ìü•Ó‚Ì—±q‚àˆÚ“®Œó•â‚ÆˆÚ“®Šm—¦‚ª•Ï‰»‚µ‚Ä‚¢‚é‚Ì‚ÅÄİ’è//
-		//(3.1)Ä’Tõ‚ª•K—v‚È—±q‚ğƒŠƒXƒgƒAƒbƒv//
+		//(3)ç§»å‹•å…ˆã®å†æ¢ç´¢//
+		//ç²’å­ã®ç§»å‹•ã«ä¼´ã„ã€ç§»å‹•ã—ãŸç²’å­ã®æ–°ã—ã„ç§»å‹•å…ˆã‚’è¦‹ã¤ã‘ã‚‹//
+		//åŠ ãˆã¦ãã®å‘¨è¾ºã®ç²’å­ã‚‚ç§»å‹•å€™è£œã¨ç§»å‹•ç¢ºç‡ãŒå¤‰åŒ–ã—ã¦ã„ã‚‹ã®ã§å†è¨­å®š//
+		//(3.1)å†æ¢ç´¢ãŒå¿…è¦ãªç²’å­ã‚’ãƒªã‚¹ãƒˆã‚¢ãƒƒãƒ—//
 		std::vector<int> re_search_atoms;
 		GetResearchSiteList(re_search_atoms, site_id_before, site_id_after, lattice_x, lattice_y, lattice_z);
 		for (const auto& id : re_search_atoms) {
-			//id‚ÍÄ’Tõ‚µ‚È‚¯‚ê‚Î‚¢‚¯‚È‚¢ƒTƒCƒg//
+			//idã¯å†æ¢ç´¢ã—ãªã‘ã‚Œã°ã„ã‘ãªã„ã‚µã‚¤ãƒˆ//
 			if (sites[id].exist_atom_id != SiteInfo::ATOM_NONE) {
-				//Ä’Tõ‚µ‚È‚¯‚ê‚Î‚¢‚¯‚È‚¢ƒTƒCƒg‚É—±q‚ª‚¢‚½‚Ì‚ÅÄ’Tõ‚·‚é//
+				//å†æ¢ç´¢ã—ãªã‘ã‚Œã°ã„ã‘ãªã„ã‚µã‚¤ãƒˆã«ç²’å­ãŒã„ãŸã®ã§å†æ¢ç´¢ã™ã‚‹//
 				EventAtom& a = atoms[sites[id].exist_atom_id];
 				const int num_found = FindoutMoveTarget(a, sites, lattice_x, lattice_y, lattice_z);
 				if (num_found > 0) {
 					double ratio = a.Ratio();
-					const int key = a.atom_id; //—±qID‚ğƒ†ƒj[ƒNkey‚Æ‚µ‚ÄƒCƒxƒ“ƒg“o˜^‚·‚é//
-					kmc_event_list.Insert(key, ratio, &a);//update‚Ìê‡‚à©“®‚Å”»•Ê//
+					const int key = a.atom_id; //ç²’å­IDã‚’ãƒ¦ãƒ‹ãƒ¼ã‚¯keyã¨ã—ã¦ã‚¤ãƒ™ãƒ³ãƒˆç™»éŒ²ã™ã‚‹//
+					kmc_event_list.Insert(key, ratio, &a);//updateã®å ´åˆã‚‚è‡ªå‹•ã§åˆ¤åˆ¥//
 				} else {//(num_found==0)//
-					//ˆÚ“®æ‚ª–³‚­‚È‚Á‚½‚Ì‚ÅƒCƒxƒ“ƒg‚Í‹N‚±‚ç‚È‚¢‚æ‚¤‚É‚·‚é//
-					const int key = a.atom_id; //—±qID‚ğƒ†ƒj[ƒNkey‚Æ‚µ‚ÄƒCƒxƒ“ƒgíœ‚·‚é//
+					//ç§»å‹•å…ˆãŒç„¡ããªã£ãŸã®ã§ã‚¤ãƒ™ãƒ³ãƒˆã¯èµ·ã“ã‚‰ãªã„ã‚ˆã†ã«ã™ã‚‹//
+					const int key = a.atom_id; //ç²’å­IDã‚’ãƒ¦ãƒ‹ãƒ¼ã‚¯keyã¨ã—ã¦ã‚¤ãƒ™ãƒ³ãƒˆå‰Šé™¤ã™ã‚‹//
 					kmc_event_list.Erase(key);
 				}
 
 			}
 		}
-		
+		//æ™‚é–“ã®ç©ç®—
+		elapse_time += 1.0 / total_ratio;
+		time_list.push_back(elapse_time);
+		// 10000ã‚¹ãƒ†ãƒƒãƒ—ã”ã¨ã«æƒ…å ±ã‚’è¡¨ç¤º
+		if (istep % 100000 == 0) {
+			auto current_time = std::chrono::high_resolution_clock::now();
+			auto duration = std::chrono::duration_cast<std::chrono::seconds>(current_time - start_time);
+
+			std::cout << "Step: " << istep << ", Time: " << duration.count() << " seconds" << std::endl;
+
+			
+		}
 	}
 	
-	//—±q‚ÌˆÚ“®‚ÌƒƒO‚ğo—Í
+	//ç²’å­ã®ç§»å‹•ã®ãƒ­ã‚°ã‚’å‡ºåŠ›
 	logger.Flush(fp);
 	fclose(fp);
-	
+
+	//çµŒéæ™‚é–“ã®å‡ºåŠ›
+	{
+		FILE* fp = fopen("elapse_time.txt", "w");
+		const int i_end = time_list.size();
+		for (int i = 0; i < i_end; ++i) {
+			fprintf(fp, "%d\t%.15f\n", i, time_list[i]);
+		}
+		fclose(fp);
+	}
 	return 0;
 }
