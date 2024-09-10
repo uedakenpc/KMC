@@ -8,7 +8,7 @@
 #include <iostream>
 #include <chrono>
 
-inline static const double kbT = 0.5;  //0.034から0.394?//
+inline static const double kbT = 0.4;  //0.034から0.394?//
 inline static const double D = 0.347;
 inline static const double C = (8.9 - 8 * D) / sqrt(8);
 inline static const double material_density = 1.0;
@@ -65,36 +65,44 @@ void InitializeSite(std::vector<SiteInfo>& sites, std::vector<EventAtom>& atoms,
 	unsigned int seed = 123456789;
 	std::mt19937 mt(seed);
 	std::uniform_real_distribution<> dist(0.0, 1.0);
-
+	
 	int num_atoms = 0;
 	int site_id = 0;
 	int N = sites.size();
 	int M = lattice_x * lattice_y * 20  ; // 下から1000個分の粒子
 
 	// x方向を5等分
-	int region_width_x = lattice_x / 10;
+	int region_width_x = lattice_x / 6;
 	// z方向を5等分 (z > 10の領域のみ)
-	int region_height_z = (lattice_z - 10) / 10;
+	int region_height_z = lattice_z  / 10;
 
 	// 各領域の粒子配置フラグ (5x5の2次元配列)
 	std::vector<std::vector<bool>> region_flags(10, std::vector<bool>(10, true));
 
 	// ここで各領域のフラグを設定します
+	//*
 	//1段目
-	//region_flags[0][0] = false;
-	//region_flags[1][0] = false;
-	//region_flags[2][0] = false;
-	//region_flags[3][0] = false;
-	//region_flags[4][0] = false;
-	//region_flags[5][0] = false;
-
+	region_flags[0][0] = false;
+	region_flags[1][0] = false;
+	region_flags[2][0] = false;
+	region_flags[3][0] = false;
+	region_flags[4][0] = false;
+	region_flags[5][0] = false;
+	//region_flags[6][0] = false;
+	//region_flags[7][0] = false;
+	//region_flags[8][0] = false;
+	//region_flags[9][0] = false;
 	//2段目
-	//region_flags[0][1] = false;
-	//region_flags[1][1] = false;
-	//region_flags[2][1] = false;
-	//region_flags[3][1] = false;
-	//region_flags[4][1] = false;
-
+	region_flags[0][1] = false;
+	region_flags[1][1] = false;
+	region_flags[2][1] = false;
+	region_flags[3][1] = false;
+	region_flags[4][1] = false;
+	region_flags[5][1] = false;
+	//region_flags[6][1] = false;
+	//region_flags[7][1] = false;
+	//region_flags[8][1] = false;
+	//region_flags[9][1] = false;
 	//3段目
 	//region_flags[0][2] = false;
 	//region_flags[1][2] = false;
@@ -124,22 +132,23 @@ void InitializeSite(std::vector<SiteInfo>& sites, std::vector<EventAtom>& atoms,
 	region_flags[2][4] = false;
 	region_flags[3][4] = false;
 	//region_flags[4][4] = false;
-	region_flags[5][4] = false;
-	region_flags[6][4] = false;
+	//region_flags[5][4] = false;
+	//region_flags[6][4] = false;
 	//region_flags[7][4] = false;
 	//region_flags[9][4] = false;
 
+	
 	//6段目
 	//region_flags[0][5] = false;
 	//region_flags[1][5] = false;
 	region_flags[2][5] = false;
 	region_flags[3][5] = false;
 	//region_flags[4][5] = false;
-	region_flags[5][5] = false;
-	region_flags[6][5] = false;
+	//region_flags[5][5] = false;
+	//region_flags[6][5] = false;
 	//region_flags[7][5] = false;
 	//region_flags[9][5] = false;
-	
+	/*
 	//7段目
 	//region_flags[0][6] = false;
 	//region_flags[1][6] = false;
@@ -162,8 +171,8 @@ void InitializeSite(std::vector<SiteInfo>& sites, std::vector<EventAtom>& atoms,
 	region_flags[7][7] = false;
 	region_flags[8][7] = false;
 	region_flags[9][7] = false;
-	
-
+	//*/
+	//*
 	//9段目
 	region_flags[0][8] = false;
 	region_flags[1][8] = false;
@@ -171,10 +180,10 @@ void InitializeSite(std::vector<SiteInfo>& sites, std::vector<EventAtom>& atoms,
 	region_flags[3][8] = false;
 	region_flags[4][8] = false;
 	region_flags[5][8] = false;
-	region_flags[6][8] = false;
-	region_flags[7][8] = false;
-	region_flags[8][8] = false;
-	region_flags[9][8] = false;
+	//region_flags[6][8] = false;
+	//region_flags[7][8] = false;
+	//region_flags[8][8] = false;
+	//region_flags[9][8] = false;
 	//10段目
 	region_flags[0][9] = false;
 	region_flags[1][9] = false;
@@ -182,14 +191,38 @@ void InitializeSite(std::vector<SiteInfo>& sites, std::vector<EventAtom>& atoms,
 	region_flags[3][9] = false;
 	region_flags[4][9] = false;
 	region_flags[5][9] = false;
-	region_flags[6][9] = false;
-	region_flags[7][9] = false;
-	region_flags[8][9] = false;
-	region_flags[9][9] = false;
+	//region_flags[6][9] = false;
+	//region_flags[7][9] = false;
+	//region_flags[8][9] = false;
+	//region_flags[9][9] = false;
 	//*/
 	
 	int sheet_thickness = 3; // シートの厚さ（y軸方向の粒子を配置する範囲）
+	for (int i = 0; i < N; ++i) {
+		auto& a = sites[i];
+		int unit_cell_id = site_id / 2;
+		int ix = unit_cell_id % lattice_x;
+		int iy = (unit_cell_id / lattice_x) % lattice_y;
+		int iz = unit_cell_id / (lattice_x * lattice_y);
 
+		if (iy < sheet_thickness) {
+			// 25個のエリアに分割
+			int region_x = ix / region_width_x;
+			int region_z = iz / region_height_z;
+
+			if (region_flags[region_x][region_z] && dist(mt) < material_density) {
+				a.exist_atom_id = num_atoms;
+				atoms.push_back(EventAtom{ num_atoms, site_id });
+				++num_atoms;
+			}
+			else {
+				a.exist_atom_id = SiteInfo::ATOM_NONE;
+			}
+			
+		}
+		++site_id;
+	}
+	/*
 	for (int i = 0; i < N; ++i) {
 		auto& a = sites[i];
 		int unit_cell_id = site_id / 2;
@@ -201,11 +234,11 @@ void InitializeSite(std::vector<SiteInfo>& sites, std::vector<EventAtom>& atoms,
 			// 既存の配置ロジック
 			if (iz < 10) {
 				// 下から1000個分の粒子はそのまま敷き詰める
-				a.exist_atom_id = num_atoms;
-				atoms.push_back(EventAtom{ num_atoms, site_id });
-				++num_atoms;
+				//a.exist_atom_id = num_atoms;
+				//atoms.push_back(EventAtom{ num_atoms, site_id });
+				//++num_atoms;
 				//敷き詰めない
-				//a.exist_atom_id = SiteInfo::ATOM_NONE;
+				a.exist_atom_id = SiteInfo::ATOM_NONE;
 			}
 			else {
 				// z > 10の領域を25個のエリアに分割
@@ -224,6 +257,7 @@ void InitializeSite(std::vector<SiteInfo>& sites, std::vector<EventAtom>& atoms,
 		}
 		++site_id;
 	}
+	//*/
 }
 
 vec3d GetCoordinate(int site_id, int lattice_x, int lattice_y, int lattice_z, double lattice_constant) {
@@ -509,15 +543,43 @@ void GetResearchSiteList(std::vector<int>& neighbor_ids, int site_id_before, int
 
 }
 
+void logVacancyCount(const std::vector<SiteInfo>& sites, int lattice_x, int lattice_y, int lattice_z, double elapse_time, FILE* fp) {
+	int vacancy_count = 0;
+
+	// エリアの定義
+	int start_x = lattice_x / 6;  // region_flags[1]に相当
+	int end_x = 5 * lattice_x / 6;  // region_flags[5]に相当
+	int start_z = 3 * lattice_z / 10;  // region_flags[][3]に相当
+	int end_z = 6 * lattice_z / 10;  // region_flags[][6]に相当
+	int start_y = 0;
+	int end_y = 2;  // y方向の奥行き一体
+
+	for (int iz = start_z; iz < end_z; ++iz) {
+		for (int iy = start_y; iy < end_y; ++iy) {
+			for (int ix = start_x; ix < end_x; ++ix) {
+				int site_id = 2 * (ix + lattice_x * (iy + lattice_y * iz));
+				if (sites[site_id].exist_atom_id == SiteInfo::ATOM_NONE) {
+					vacancy_count++;
+				}
+				// BCC構造の2つ目のサイトもチェック
+				if (sites[site_id + 1].exist_atom_id == SiteInfo::ATOM_NONE) {
+					vacancy_count++;
+				}
+			}
+		}
+	}
+
+	fprintf(fp, "%.6f %d\n", elapse_time, vacancy_count);
+}
 
 int main(int argc, char* argv[]) {
 	printf("Simple KMC start--------------------\n");
 	// 開始時刻を記録
 	auto start_time = std::chrono::high_resolution_clock::now();
-	const int64_t STEPS = 300000;
-	const int lattice_x = 50;
+	const int64_t STEPS = 80000000;
+	const int lattice_x = 30;
 	const int lattice_y = 2;
-	const int lattice_z = 60;
+	const int lattice_z = 50;
 	double lattice_constant = 3.0;
 	double box_axis_org[12]{ lattice_constant * (double)lattice_x * 2, 0.0, 0.0,
 					0.0, lattice_constant * (double)lattice_y * 2, 0.0,
@@ -558,6 +620,13 @@ int main(int argc, char* argv[]) {
 	std::mt19937 mt(seed);
 	std::uniform_real_distribution<double> dist(0.0,1.0);
 	double elapse_time = 0.0;
+
+	//空孔の数
+	const double LOG_INTERVAL = 10000.0;  // ログを出力する時間間隔
+	double next_log_time = LOG_INTERVAL;
+	FILE* vacancy_log = fopen("vacancy_log.txt", "w");
+	logVacancyCount(sites, lattice_x, lattice_y, lattice_z, 0.0, vacancy_log);
+
 	std::vector<double> time_list;
 	for (int64_t istep = 1; istep <= STEPS; ++istep) {
 		//(1)イベントを起こす//
@@ -640,6 +709,15 @@ int main(int argc, char* argv[]) {
 
 			
 		}
+
+		//空孔の数の計算
+		// 一定時間間隔でログを出力
+		if (elapse_time >= next_log_time) {
+			logVacancyCount(sites, lattice_x, lattice_y, lattice_z, elapse_time, vacancy_log);
+			next_log_time += LOG_INTERVAL;
+		}
+
+
 	}
 	
 	//粒子の移動のログを出力
@@ -655,5 +733,8 @@ int main(int argc, char* argv[]) {
 		}
 		fclose(fp);
 	}
+
+	fclose(vacancy_log);
+
 	return 0;
 }
