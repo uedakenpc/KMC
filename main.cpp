@@ -8,7 +8,7 @@
 #include <iostream>
 #include <chrono>
 
-inline static const double kbT = 0.4;  //0.034から0.394?//
+inline static const double kbT = 0.5;  //0.034から0.394?//
 inline static const double D = 0.347;
 inline static const double C = (8.9 - 8 * D) / sqrt(8);
 inline static const double material_density = 1.0;
@@ -65,199 +65,118 @@ void InitializeSite(std::vector<SiteInfo>& sites, std::vector<EventAtom>& atoms,
 	unsigned int seed = 123456789;
 	std::mt19937 mt(seed);
 	std::uniform_real_distribution<> dist(0.0, 1.0);
-	
 	int num_atoms = 0;
 	int site_id = 0;
-	int N = sites.size();
-	int M = lattice_x * lattice_y * 20  ; // 下から1000個分の粒子
 
-	// x方向を5等分
-	int region_width_x = lattice_x / 6;
-	// z方向を5等分 (z > 10の領域のみ)
-	int region_height_z = lattice_z  / 10;
+	// 各層の高さを計算
+	int layer_height = lattice_z / 5;
 
-	// 各領域の粒子配置フラグ (5x5の2次元配列)
-	std::vector<std::vector<bool>> region_flags(10, std::vector<bool>(10, true));
+	for (int iz = 0; iz < lattice_z; ++iz) {
+		int layer = iz / layer_height;
 
-	// ここで各領域のフラグを設定します
-	//*
-	//1段目
-	region_flags[0][0] = false;
-	region_flags[1][0] = false;
-	region_flags[2][0] = false;
-	region_flags[3][0] = false;
-	region_flags[4][0] = false;
-	region_flags[5][0] = false;
-	//region_flags[6][0] = false;
-	//region_flags[7][0] = false;
-	//region_flags[8][0] = false;
-	//region_flags[9][0] = false;
-	//2段目
-	region_flags[0][1] = false;
-	region_flags[1][1] = false;
-	region_flags[2][1] = false;
-	region_flags[3][1] = false;
-	region_flags[4][1] = false;
-	region_flags[5][1] = false;
-	//region_flags[6][1] = false;
-	//region_flags[7][1] = false;
-	//region_flags[8][1] = false;
-	//region_flags[9][1] = false;
-	//3段目
-	//region_flags[0][2] = false;
-	//region_flags[1][2] = false;
-    //region_flags[2][2] = false;
-	//region_flags[3][2] = false;
-	//region_flags[4][2] = false;
-	//region_flags[5][2] = false;
-	//region_flags[6][2] = false;
-	//region_flags[7][2] = false;
-	//region_flags[8][2] = false;
-	//region_flags[9][2] = false;
-	//4段目
-	//region_flags[0][3] = false;
-	//region_flags[1][3] = false;
-	//region_flags[2][3] = false;
-	//region_flags[3][3] = false;
-	//region_flags[4][3] = false;
-	//region_flags[5][3] = false;
-	//region_flags[6][3] = false;
-	//region_flags[7][3] = false;
-	//region_flags[8][3] = false;
-	//region_flags[9][3] = false;
+		for (int iy = 0; iy < lattice_y; ++iy) {
+			for (int ix = 0; ix < lattice_x; ++ix) {
+				for (int sub_cell = 0; sub_cell < 2; ++sub_cell) {
+					site_id = 2 * (ix + lattice_x * (iy + lattice_y * iz)) + sub_cell;
+					auto& a = sites[site_id];
 
-	//5段目
-	//region_flags[0][4] = false;
-	//region_flags[1][4] = false;
-	region_flags[2][4] = false;
-	region_flags[3][4] = false;
-	//region_flags[4][4] = false;
-	//region_flags[5][4] = false;
-	//region_flags[6][4] = false;
-	//region_flags[7][4] = false;
-	//region_flags[9][4] = false;
+					// 各層ごとの処理
+					if (layer == 0) {
+						// 1段目: 40%の確率で空孔
+						if (dist(mt) > 0.1) {
+							a.exist_atom_id = num_atoms;
+							atoms.push_back(EventAtom{ num_atoms, site_id });
+							++num_atoms;
+						}
+						else {
+							a.exist_atom_id = SiteInfo::ATOM_NONE;
+						}
+					}
+					else if (layer == 1) {
+						// 2段目: 30%の確率で隣接する2つの空孔
+						if (ix % 2 == 0 && iy % 2 == 0 && sub_cell == 0) {
+							if (dist(mt) < 0.3) {
+								a.exist_atom_id = SiteInfo::ATOM_NONE;
+								sites[site_id + 1].exist_atom_id = SiteInfo::ATOM_NONE;
+							}
+							else {
+								a.exist_atom_id = num_atoms;
+								atoms.push_back(EventAtom{ num_atoms, site_id });
+								++num_atoms;
+							}
+						}
+						else if (ix % 2 == 1 || iy % 2 == 1 || sub_cell == 1) {
+							if (sites[site_id - 1].exist_atom_id != SiteInfo::ATOM_NONE) {
+								a.exist_atom_id = num_atoms;
+								atoms.push_back(EventAtom{ num_atoms, site_id });
+								++num_atoms;
+							}
+						}
+					}
+					else if (layer == 2) {
+						// 3段目: 全てのサイトに粒子を配置（球状の空孔は後で作成）
+						a.exist_atom_id = num_atoms;
+						atoms.push_back(EventAtom{ num_atoms, site_id });
+						++num_atoms;
+					}
+					else if (layer == 3) {
+						// 4段目: x方向に6分割、z方向に2分割して12個のエリアを作成
+						int area_width = lattice_x / 6;
+						int area_height = layer_height / 2;
+						int area_x = ix / area_width;
+						int area_z = (iz - layer * layer_height) / area_height;
 
-	
-	//6段目
-	//region_flags[0][5] = false;
-	//region_flags[1][5] = false;
-	region_flags[2][5] = false;
-	region_flags[3][5] = false;
-	//region_flags[4][5] = false;
-	//region_flags[5][5] = false;
-	//region_flags[6][5] = false;
-	//region_flags[7][5] = false;
-	//region_flags[9][5] = false;
-	/*
-	//7段目
-	//region_flags[0][6] = false;
-	//region_flags[1][6] = false;
-	//region_flags[2][6] = false;
-	//region_flags[3][6] = false;
-	//region_flags[4][6] = false;
-	//region_flags[5][6] = false;
-
-	//region_flags[9][6] = false;
-
-	//8段目
-	/*
-	region_flags[0][7] = false;
-	region_flags[1][7] = false;
-	region_flags[2][7] = false;
-	region_flags[3][7] = false;
-	region_flags[4][7] = false;
-	region_flags[5][7] = false;
-	region_flags[6][7] = false;
-	region_flags[7][7] = false;
-	region_flags[8][7] = false;
-	region_flags[9][7] = false;
-	//*/
-	//*
-	//9段目
-	region_flags[0][8] = false;
-	region_flags[1][8] = false;
-	region_flags[2][8] = false;
-	region_flags[3][8] = false;
-	region_flags[4][8] = false;
-	region_flags[5][8] = false;
-	//region_flags[6][8] = false;
-	//region_flags[7][8] = false;
-	//region_flags[8][8] = false;
-	//region_flags[9][8] = false;
-	//10段目
-	region_flags[0][9] = false;
-	region_flags[1][9] = false;
-	region_flags[2][9] = false;
-	region_flags[3][9] = false;
-	region_flags[4][9] = false;
-	region_flags[5][9] = false;
-	//region_flags[6][9] = false;
-	//region_flags[7][9] = false;
-	//region_flags[8][9] = false;
-	//region_flags[9][9] = false;
-	//*/
-	
-	int sheet_thickness = 3; // シートの厚さ（y軸方向の粒子を配置する範囲）
-	for (int i = 0; i < N; ++i) {
-		auto& a = sites[i];
-		int unit_cell_id = site_id / 2;
-		int ix = unit_cell_id % lattice_x;
-		int iy = (unit_cell_id / lattice_x) % lattice_y;
-		int iz = unit_cell_id / (lattice_x * lattice_y);
-
-		if (iy < sheet_thickness) {
-			// 25個のエリアに分割
-			int region_x = ix / region_width_x;
-			int region_z = iz / region_height_z;
-
-			if (region_flags[region_x][region_z] && dist(mt) < material_density) {
-				a.exist_atom_id = num_atoms;
-				atoms.push_back(EventAtom{ num_atoms, site_id });
-				++num_atoms;
-			}
-			else {
-				a.exist_atom_id = SiteInfo::ATOM_NONE;
-			}
-			
-		}
-		++site_id;
-	}
-	/*
-	for (int i = 0; i < N; ++i) {
-		auto& a = sites[i];
-		int unit_cell_id = site_id / 2;
-		int ix = unit_cell_id % lattice_x;
-		int iy = (unit_cell_id / lattice_x) % lattice_y;
-		int iz = unit_cell_id / (lattice_x * lattice_y);
-
-		if (iy < sheet_thickness) {
-			// 既存の配置ロジック
-			if (iz < 10) {
-				// 下から1000個分の粒子はそのまま敷き詰める
-				//a.exist_atom_id = num_atoms;
-				//atoms.push_back(EventAtom{ num_atoms, site_id });
-				//++num_atoms;
-				//敷き詰めない
-				a.exist_atom_id = SiteInfo::ATOM_NONE;
-			}
-			else {
-				// z > 10の領域を25個のエリアに分割
-				int region_x = ix / region_width_x;
-				int region_z = (iz - 10) / region_height_z;
-
-				if (region_flags[region_x][region_z] && dist(mt) < material_density) {
-					a.exist_atom_id = num_atoms;
-					atoms.push_back(EventAtom{ num_atoms, site_id });
-					++num_atoms;
-				}
-				else {
-					a.exist_atom_id = SiteInfo::ATOM_NONE;
+						// 下段の左から2,4番目のエリアを空孔に
+						if (area_z == 0 && (area_x == 1 || area_x == 3)) {
+							a.exist_atom_id = SiteInfo::ATOM_NONE;
+						}
+						else {
+							// 10%の確率で追加の空孔を配置
+							if (dist(mt) < 0.4) {
+								a.exist_atom_id = SiteInfo::ATOM_NONE;
+							}
+							else {
+								a.exist_atom_id = num_atoms;
+								atoms.push_back(EventAtom{ num_atoms, site_id });
+								++num_atoms;
+							}
+						}
+					}
+					else {
+						// 5段目: 粒子を配置しない
+						a.exist_atom_id = SiteInfo::ATOM_NONE;
+					}
 				}
 			}
 		}
-		++site_id;
 	}
-	//*/
+
+	// 3段目の球状空孔の配置（変更なし）
+	int third_layer_start = 2 * layer_height;
+	int third_layer_end = 3 * layer_height;
+	for (int i = 0; i < 80; ++i) {
+		int center_x = mt() % lattice_x;
+		int center_y = mt() % lattice_y;
+		int center_z = mt() % layer_height + third_layer_start;
+		int radius = 1;  // 半径1の球状空孔（直径3）
+
+		for (int dx = -radius; dx <= radius; ++dx) {
+			for (int dy = -radius; dy <= radius; ++dy) {
+				for (int dz = -radius; dz <= radius; ++dz) {
+					if (dx * dx + dy * dy + dz * dz <= radius * radius) {
+						int x = (center_x + dx + lattice_x) % lattice_x;
+						int y = (center_y + dy + lattice_y) % lattice_y;
+						int z = center_z + dz;
+						if (z >= third_layer_start && z < third_layer_end) {
+							int void_site_id = 2 * (x + lattice_x * (y + lattice_y * z));
+							sites[void_site_id].exist_atom_id = SiteInfo::ATOM_NONE;
+							sites[void_site_id + 1].exist_atom_id = SiteInfo::ATOM_NONE;
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 vec3d GetCoordinate(int site_id, int lattice_x, int lattice_y, int lattice_z, double lattice_constant) {
@@ -576,7 +495,7 @@ int main(int argc, char* argv[]) {
 	printf("Simple KMC start--------------------\n");
 	// 開始時刻を記録
 	auto start_time = std::chrono::high_resolution_clock::now();
-	const int64_t STEPS = 80000000;
+	const int64_t STEPS = 50000000;
 	const int lattice_x = 30;
 	const int lattice_y = 2;
 	const int lattice_z = 50;
