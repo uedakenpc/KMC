@@ -8,7 +8,7 @@
 #include <iostream>
 #include <chrono>
 
-inline static const double kbT = 0.5;  //0.034から0.394?//
+inline static const double kbT = 0.3;  //0.034から0.394?//
 inline static const double D = 0.347;
 inline static const double C = (8.9 - 8 * D) / sqrt(8);
 inline static const double material_density = 1.0;
@@ -61,124 +61,57 @@ struct SiteInfo {
 * 計算したい材料の構造に合わせて適宜書き換える
 * この例ではsitesで与えられているサイトに、ある確率に従って粒子を配置する
 **/
-void InitializeSite(std::vector<SiteInfo>& sites, std::vector<EventAtom>& atoms, int lattice_x, int lattice_y, int lattice_z) {
+void InitializeSite(std::vector<SiteInfo>& sites, std::vector<EventAtom>& atoms, int lattice_x, int lattice_y, int lattice_z, int void_distance, int second_void_size) {
 	unsigned int seed = 123456789;
 	std::mt19937 mt(seed);
 	std::uniform_real_distribution<> dist(0.0, 1.0);
+
 	int num_atoms = 0;
-	int site_id = 0;
+	int N = sites.size();
 
-	// 各層の高さを計算
-	int layer_height = lattice_z / 5;
+	// 空洞の定義
+	struct Void {
+		int start_x, end_x, start_z, end_z;
+	};
 
-	for (int iz = 0; iz < lattice_z; ++iz) {
-		int layer = iz / layer_height;
+	// 1つ目の空洞（固定サイズ10x10）
+	Void void1 = { 2 * lattice_x / 10, 4 * lattice_x / 10, 4 * lattice_z / 10, 6 * lattice_z / 10 };
 
-		for (int iy = 0; iy < lattice_y; ++iy) {
-			for (int ix = 0; ix < lattice_x; ++ix) {
-				for (int sub_cell = 0; sub_cell < 2; ++sub_cell) {
-					site_id = 2 * (ix + lattice_x * (iy + lattice_y * iz)) + sub_cell;
-					auto& a = sites[site_id];
+	// 2つ目の空洞（可変サイズ）
+	int void2_size_x = second_void_size;
+	int void2_size_z = second_void_size;
+	int void2_start_x = void1.end_x + void_distance;
+	int void2_start_z = (void1.start_z + void1.end_z - void2_size_z) / 2; // 中心を揃える
+	Void void2 = { void2_start_x, void2_start_x + void2_size_x, void2_start_z, void2_start_z + void2_size_z };
 
-					// 各層ごとの処理
-					if (layer == 0) {
-						// 1段目: 40%の確率で空孔
-						if (dist(mt) > 0.1) {
-							a.exist_atom_id = num_atoms;
-							atoms.push_back(EventAtom{ num_atoms, site_id });
-							++num_atoms;
-						}
-						else {
-							a.exist_atom_id = SiteInfo::ATOM_NONE;
-						}
-					}
-					else if (layer == 1) {
-						// 2段目: 30%の確率で隣接する2つの空孔
-						if (ix % 2 == 0 && iy % 2 == 0 && sub_cell == 0) {
-							if (dist(mt) < 0.3) {
-								a.exist_atom_id = SiteInfo::ATOM_NONE;
-								sites[site_id + 1].exist_atom_id = SiteInfo::ATOM_NONE;
-							}
-							else {
-								a.exist_atom_id = num_atoms;
-								atoms.push_back(EventAtom{ num_atoms, site_id });
-								++num_atoms;
-							}
-						}
-						else if (ix % 2 == 1 || iy % 2 == 1 || sub_cell == 1) {
-							if (sites[site_id - 1].exist_atom_id != SiteInfo::ATOM_NONE) {
-								a.exist_atom_id = num_atoms;
-								atoms.push_back(EventAtom{ num_atoms, site_id });
-								++num_atoms;
-							}
-						}
-					}
-					else if (layer == 2) {
-						// 3段目: 全てのサイトに粒子を配置（球状の空孔は後で作成）
-						a.exist_atom_id = num_atoms;
-						atoms.push_back(EventAtom{ num_atoms, site_id });
-						++num_atoms;
-					}
-					else if (layer == 3) {
-						// 4段目: x方向に6分割、z方向に2分割して12個のエリアを作成
-						int area_width = lattice_x / 6;
-						int area_height = layer_height / 2;
-						int area_x = ix / area_width;
-						int area_z = (iz - layer * layer_height) / area_height;
+	auto isInVoid = [&](int x, int z) {
+		return (x >= void1.start_x && x < void1.end_x && z >= void1.start_z && z < void1.end_z) ||
+			(x >= void2.start_x && x < void2.end_x && z >= void2.start_z && z < void2.end_z);
+		};
 
-						// 下段の左から2,4番目のエリアを空孔に
-						if (area_z == 0 && (area_x == 1 || area_x == 3)) {
-							a.exist_atom_id = SiteInfo::ATOM_NONE;
-						}
-						else {
-							// 10%の確率で追加の空孔を配置
-							if (dist(mt) < 0.4) {
-								a.exist_atom_id = SiteInfo::ATOM_NONE;
-							}
-							else {
-								a.exist_atom_id = num_atoms;
-								atoms.push_back(EventAtom{ num_atoms, site_id });
-								++num_atoms;
-							}
-						}
-					}
-					else {
-						// 5段目: 粒子を配置しない
-						a.exist_atom_id = SiteInfo::ATOM_NONE;
-					}
-				}
+	int sheet_thickness = 3; // シートの厚さ（y軸方向の粒子を配置する範囲）
+
+	for (int site_id = 0; site_id < N; ++site_id) {
+		int unit_cell_id = site_id / 2;
+		int ix = unit_cell_id % lattice_x;
+		int iy = (unit_cell_id / lattice_x) % lattice_y;
+		int iz = unit_cell_id / (lattice_x * lattice_y);
+
+		if (iy < sheet_thickness) {
+			if (iz < 10 || (iz >= 10 && !isInVoid(ix, iz) && dist(mt) < material_density)) {
+				sites[site_id].exist_atom_id = num_atoms;
+				atoms.push_back(EventAtom{ num_atoms, site_id });
+				++num_atoms;
+			}
+			else {
+				sites[site_id].exist_atom_id = SiteInfo::ATOM_NONE;
 			}
 		}
-	}
-
-	// 3段目の球状空孔の配置（変更なし）
-	int third_layer_start = 2 * layer_height;
-	int third_layer_end = 3 * layer_height;
-	for (int i = 0; i < 80; ++i) {
-		int center_x = mt() % lattice_x;
-		int center_y = mt() % lattice_y;
-		int center_z = mt() % layer_height + third_layer_start;
-		int radius = 1;  // 半径1の球状空孔（直径3）
-
-		for (int dx = -radius; dx <= radius; ++dx) {
-			for (int dy = -radius; dy <= radius; ++dy) {
-				for (int dz = -radius; dz <= radius; ++dz) {
-					if (dx * dx + dy * dy + dz * dz <= radius * radius) {
-						int x = (center_x + dx + lattice_x) % lattice_x;
-						int y = (center_y + dy + lattice_y) % lattice_y;
-						int z = center_z + dz;
-						if (z >= third_layer_start && z < third_layer_end) {
-							int void_site_id = 2 * (x + lattice_x * (y + lattice_y * z));
-							sites[void_site_id].exist_atom_id = SiteInfo::ATOM_NONE;
-							sites[void_site_id + 1].exist_atom_id = SiteInfo::ATOM_NONE;
-						}
-					}
-				}
-			}
+		else {
+			sites[site_id].exist_atom_id = SiteInfo::ATOM_NONE;
 		}
 	}
 }
-
 vec3d GetCoordinate(int site_id, int lattice_x, int lattice_y, int lattice_z, double lattice_constant) {
 	int odd = site_id % 2;  //偶数なら0奇数なら1
 	int unit_cell_id = site_id / 2;
@@ -462,44 +395,41 @@ void GetResearchSiteList(std::vector<int>& neighbor_ids, int site_id_before, int
 
 }
 
-void logVacancyCount(const std::vector<SiteInfo>& sites, int lattice_x, int lattice_y, int lattice_z, double elapse_time, FILE* fp) {
-	int vacancy_count = 0;
+double calculateMSD(const std::vector<vec3d>& initial_pos, const std::vector<EventAtom>& current_atoms, int lattice_x, int lattice_y, int lattice_z, double lattice_constant) {
+	double msd = 0.0;
+	int count = 0;
+	for (size_t i = 0; i < current_atoms.size(); ++i) {
+		vec3d current_pos = GetCoordinate(current_atoms[i].currest_site_id, lattice_x, lattice_y, lattice_z, lattice_constant);
+		vec3d displacement = current_pos - initial_pos[i];
 
-	// エリアの定義
-	int start_x = lattice_x / 6;  // region_flags[1]に相当
-	int end_x = 5 * lattice_x / 6;  // region_flags[5]に相当
-	int start_z = 3 * lattice_z / 10;  // region_flags[][3]に相当
-	int end_z = 6 * lattice_z / 10;  // region_flags[][6]に相当
-	int start_y = 0;
-	int end_y = 2;  // y方向の奥行き一体
-
-	for (int iz = start_z; iz < end_z; ++iz) {
-		for (int iy = start_y; iy < end_y; ++iy) {
-			for (int ix = start_x; ix < end_x; ++ix) {
-				int site_id = 2 * (ix + lattice_x * (iy + lattice_y * iz));
-				if (sites[site_id].exist_atom_id == SiteInfo::ATOM_NONE) {
-					vacancy_count++;
-				}
-				// BCC構造の2つ目のサイトもチェック
-				if (sites[site_id + 1].exist_atom_id == SiteInfo::ATOM_NONE) {
-					vacancy_count++;
-				}
-			}
+		// 周期境界条件の考慮
+		if (fabs(displacement.x) > lattice_constant * lattice_x / 2) {
+			displacement.x -= copysign(lattice_constant * lattice_x, displacement.x);
 		}
-	}
+		if (fabs(displacement.y) > lattice_constant * lattice_y / 2) {
+			displacement.y -= copysign(lattice_constant * lattice_y, displacement.y);
+		}
+		if (fabs(displacement.z) > lattice_constant * lattice_z / 2) {
+			displacement.z -= copysign(lattice_constant * lattice_z, displacement.z);
+		}
 
-	fprintf(fp, "%.6f %d\n", elapse_time, vacancy_count);
+		msd += displacement.x * displacement.x + displacement.y * displacement.y + displacement.z * displacement.z;
+		count++;
+	}
+	return count > 0 ? msd / count : 0.0;
 }
 
 int main(int argc, char* argv[]) {
 	printf("Simple KMC start--------------------\n");
 	// 開始時刻を記録
 	auto start_time = std::chrono::high_resolution_clock::now();
-	const int64_t STEPS = 50000000;
-	const int lattice_x = 30;
+	const int64_t STEPS = 5000;
+	const int lattice_x = 50;
 	const int lattice_y = 2;
 	const int lattice_z = 50;
-	double lattice_constant = 3.0;
+	int void_distance = 6; // 2つの空洞間の距離（格子数）
+	int second_void_size = 10; // 2つ目の空洞の一辺の長さ（格子数、偶数）
+	double lattice_constant = 3.165;
 	double box_axis_org[12]{ lattice_constant * (double)lattice_x * 2, 0.0, 0.0,
 					0.0, lattice_constant * (double)lattice_y * 2, 0.0,
 					0.0, 0.0, lattice_constant * (double)lattice_z * 2,
@@ -513,8 +443,21 @@ int main(int argc, char* argv[]) {
 	FILE* fp = fopen("kmc_log.krb", "w");
 	logger.Initialize(fp, box_axis_org);
 
+	// MSD出力用のファイルを開く（ループの前に配置）
+	FILE* msd_file = fopen("msd_output.txt", "w");
+	fprintf(msd_file, "Step\tTime\tMSD\n");
+
+
 	//サイトに初期の粒子を配置//
-	InitializeSite(sites, atoms,lattice_x, lattice_y,  lattice_z);
+	 
+	InitializeSite(sites, atoms, lattice_x, lattice_y, lattice_z, void_distance, second_void_size);
+	//InitializeSite(sites, atoms,lattice_x, lattice_y,  lattice_z);
+
+	std::vector<vec3d> initial_positions;
+	for (const auto& a : atoms) {
+		initial_positions.push_back(GetCoordinate(a.currest_site_id, lattice_x, lattice_y, lattice_z, lattice_constant));
+	}
+
 
 	//初期粒子の位置をloggerに登録//
 	for (const auto& a : atoms) {
@@ -539,13 +482,6 @@ int main(int argc, char* argv[]) {
 	std::mt19937 mt(seed);
 	std::uniform_real_distribution<double> dist(0.0,1.0);
 	double elapse_time = 0.0;
-
-	//空孔の数
-	const double LOG_INTERVAL = 10000.0;  // ログを出力する時間間隔
-	double next_log_time = LOG_INTERVAL;
-	FILE* vacancy_log = fopen("vacancy_log.txt", "w");
-	logVacancyCount(sites, lattice_x, lattice_y, lattice_z, 0.0, vacancy_log);
-
 	std::vector<double> time_list;
 	for (int64_t istep = 1; istep <= STEPS; ++istep) {
 		//(1)イベントを起こす//
@@ -629,11 +565,9 @@ int main(int argc, char* argv[]) {
 			
 		}
 
-		//空孔の数の計算
-		// 一定時間間隔でログを出力
-		if (elapse_time >= next_log_time) {
-			logVacancyCount(sites, lattice_x, lattice_y, lattice_z, elapse_time, vacancy_log);
-			next_log_time += LOG_INTERVAL;
+		if (istep % 100000 == 0) {  // 1000ステップごとに計算
+			double msd = calculateMSD(initial_positions, atoms, lattice_x, lattice_y, lattice_z, lattice_constant);
+			fprintf(msd_file, "%lld\t%.6f\t%.6f\n", istep, elapse_time, msd);
 		}
 
 
@@ -642,6 +576,8 @@ int main(int argc, char* argv[]) {
 	//粒子の移動のログを出力
 	logger.Flush(fp);
 	fclose(fp);
+
+	fclose(msd_file);
 
 	//経過時間の出力
 	{
@@ -652,8 +588,5 @@ int main(int argc, char* argv[]) {
 		}
 		fclose(fp);
 	}
-
-	fclose(vacancy_log);
-
 	return 0;
 }
