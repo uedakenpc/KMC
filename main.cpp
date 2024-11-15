@@ -8,11 +8,25 @@
 #include <iostream>
 #include <chrono>
 
-inline static const double kbT = 0.3;  //0.034から0.394?//
+inline static const double kbT = 0.4;  //0.034から0.394?//
 inline static const double D = 0.347;
 inline static const double C = (8.9 - 8 * D) / sqrt(8);
 inline static const double material_density = 1.0;
 inline static const double material_density_2 = 1.0;
+
+// プレファクター
+inline static const double d = 2.0;                    // 次元数
+inline static const double L = 3.165e-10;             // 格子定数[m]
+inline static const double S = 4.0;                   // サイト数
+inline static const double D0 = 2.6e-7;                // 拡散係数の前指数因子
+inline static const double E_m = 0.92;                // 活性化エネルギー[eV]
+double calculate_DT(double T) {
+	return D0 * exp(-E_m / (kbT));
+}
+double calculate_p0(double T) {
+	double DT = calculate_DT(T);
+	return 2.0 * d * DT / (L * L * S);
+}
 
 struct MoveTarget {
 	int size_id_org;      //移動前のサイトを示すID//
@@ -336,12 +350,11 @@ int FindoutMoveTarget(EventAtom& a, const std::vector<SiteInfo>& sites, int latt
 			////////////////////////////////////////////エネルギー差 E_B - E_C //
 
 
-			// 暫定的にkbT=1.0
+			// 遷移確率の計算
 			double ratio;
-
-
-			if ((dE_B_from_A) > 0.0) {
-				ratio = exp(-dE_B_from_A / kbT);
+			if (dE_B_from_A > 0.0) {
+				double p0 = calculate_p0(kbT);
+				ratio = p0 * exp(-dE_B_from_A / kbT);
 			}
 			else {
 				ratio = 1.0;
@@ -423,12 +436,12 @@ int main(int argc, char* argv[]) {
 	printf("Simple KMC start--------------------\n");
 	// 開始時刻を記録
 	auto start_time = std::chrono::high_resolution_clock::now();
-	const int64_t STEPS = 5000;
+	const int64_t STEPS = 10000;
 	const int lattice_x = 50;
 	const int lattice_y = 2;
 	const int lattice_z = 50;
-	int void_distance = 6; // 2つの空洞間の距離（格子数）
-	int second_void_size = 10; // 2つ目の空洞の一辺の長さ（格子数、偶数）
+	int void_distance = 2; // 2つの空洞間の距離（格子数）
+	int second_void_size = 8; // 2つ目の空洞の一辺の長さ（格子数、偶数）
 	double lattice_constant = 3.165;
 	double box_axis_org[12]{ lattice_constant * (double)lattice_x * 2, 0.0, 0.0,
 					0.0, lattice_constant * (double)lattice_y * 2, 0.0,
@@ -444,8 +457,8 @@ int main(int argc, char* argv[]) {
 	logger.Initialize(fp, box_axis_org);
 
 	// MSD出力用のファイルを開く（ループの前に配置）
-	FILE* msd_file = fopen("msd_output.txt", "w");
-	fprintf(msd_file, "Step\tTime\tMSD\n");
+	//FILE* msd_file = fopen("msd_output.txt", "w");
+	//fprintf(msd_file, "Step\tTime\tMSD\n");
 
 
 	//サイトに初期の粒子を配置//
@@ -553,8 +566,10 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		//時間の積算
-		elapse_time += 1.0 / total_ratio;
+		double p0 = calculate_p0(kbT);
+		elapse_time += 1.0 / (p0 * total_ratio);
 		time_list.push_back(elapse_time);
+
 		// 10000ステップごとに情報を表示
 		if (istep % 100000 == 0) {
 			auto current_time = std::chrono::high_resolution_clock::now();
@@ -565,10 +580,10 @@ int main(int argc, char* argv[]) {
 			
 		}
 
-		if (istep % 100000 == 0) {  // 1000ステップごとに計算
-			double msd = calculateMSD(initial_positions, atoms, lattice_x, lattice_y, lattice_z, lattice_constant);
-			fprintf(msd_file, "%lld\t%.6f\t%.6f\n", istep, elapse_time, msd);
-		}
+		//if (istep % 100000 == 0) {  // 1000ステップごとに計算
+			//double msd = calculateMSD(initial_positions, atoms, lattice_x, lattice_y, lattice_z, lattice_constant);
+			//fprintf(msd_file, "%lld\t%.6f\t%.6f\n", istep, elapse_time, msd);
+		//}
 
 
 	}
@@ -577,14 +592,14 @@ int main(int argc, char* argv[]) {
 	logger.Flush(fp);
 	fclose(fp);
 
-	fclose(msd_file);
+	//fclose(msd_file);
 
 	//経過時間の出力
 	{
 		FILE* fp = fopen("elapse_time.txt", "w");
 		const int i_end = time_list.size();
 		for (int i = 0; i < i_end; ++i) {
-			fprintf(fp, "%d\t%.15f\n", i, time_list[i]);
+			fprintf(fp, "%d\t%.25f\n", i, time_list[i]);
 		}
 		fclose(fp);
 	}
